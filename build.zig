@@ -5,7 +5,7 @@ pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
-    const main_tests = b.addTest("src/tests.zig");
+    const main_tests = b.addTest("zlaap.zig");
     main_tests.setFilter(b.option([]const u8, "test-filter", "Filter which tests to run"));
     main_tests.setBuildMode(mode);
     main_tests.setTarget(target);
