@@ -1,5 +1,4 @@
 const std = @import("std");
-const LibExeObjStep = std.build.LibExeObjStep;
 const CrossTarget = std.zig.CrossTarget;
 const ReleaseMode = std.builtin.Mode;
 const Builder = std.build.Builder;
@@ -28,7 +27,8 @@ pub fn build(b: *Builder) void {
     const test_filter = b.option([]const u8, "test-filter", "Filter which unit tests are to be executed");
     var cross_tests = b.option(bool, "cross-tests", "Execute tests through qemu, wasmtime, and wine") orelse test_everything;
     const wasi_tests = b.option(bool, "wasi-tests", "Execute tests through wasmtime") orelse cross_tests;
-    const qemu_tests = b.option(bool, "qemu-tests", "Execute tests through qemu") orelse cross_tests;
+    const qemu_tests = (b.option(bool, "qemu-tests", "Execute tests through qemu") orelse cross_tests) and
+        std.builtin.os.tag != .windows;
     const wine_tests = (b.option(bool, "wine-tests", "Execute tests through wine") orelse cross_tests) and
         std.builtin.os.tag != .windows and (std.builtin.cpu.arch == .x86_64 or std.builtin.cpu.arch == .i386);
     cross_tests = wasi_tests or qemu_tests or wine_tests;
@@ -49,12 +49,12 @@ pub fn build(b: *Builder) void {
     }
 
     if (num_modes == 0 and !b.invalid_user_input) {
-        b.invalid_user_input = true;
         if (test_everything) {
             std.debug.print("error: all build modes were manually disabled\n", .{});
         } else {
             std.debug.print("error: unable to infer requested build mode\n", .{});
         }
+        std.process.exit(1);
     }
 
     const test_step = b.step("test", "Run library tests");
@@ -79,6 +79,8 @@ pub fn build(b: *Builder) void {
             .riscv64,
         }) |arch| {
             if (arch.ptrBitWidth() > std.builtin.cpu.arch.ptrBitWidth())
+                continue;
+            if (arch == .riscv64 and std.builtin.os.tag != .linux)
                 continue;
             if (qemu_tests or arch == std.builtin.cpu.arch)
                 test_config.addTest(.{ .cpu_arch = arch, .os_tag = std.builtin.os.tag }, false);

@@ -46,7 +46,7 @@ pub const WasiArgs = struct {
         self: *WasiArgs,
         allocator: *Allocator,
         comptime span: bool,
-    ) if (span) [][:0]u8 else [][*:0]u8 {
+    ) InitError!(if (span) [][:0]u8 else [][*:0]u8) {
         if (std.builtin.os.tag != .wasi)
             @compileError("Cannot initialize WASI argument buffer on non-WASI target.");
 
