@@ -62,7 +62,7 @@ pub const WasiArgs = struct {
         errdefer self.deinit(allocator);
 
         // Retrieve the argument data, storing it in the newly-allocated buffer.
-        err = wasi.args_get(buf.argv, buf.buf);
+        err = wasi.args_get(buf.argv.ptr, buf.buf.ptr);
         if (err != wasi.ESUCCESS)
             return unexpectedErrno(err);
 
