@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const wasi = std.os.wasi;
 const Allocator = std.mem.Allocator;
 const unexpectedErrno = std.os.unexpectedErrno;
@@ -44,10 +45,10 @@ pub const WasiArgs = struct {
     /// If `span` is true, return value is a slice of [:0]u8.
     pub fn argv(
         self: *WasiArgs,
-        allocator: *Allocator,
+        allocator: Allocator,
         comptime span: bool,
     ) InitError!(if (span) [][:0]u8 else [][*:0]u8) {
-        if (std.builtin.os.tag != .wasi)
+        if (builtin.os.tag != .wasi)
             @compileError("Cannot initialize WASI argument buffer on non-WASI target.");
 
         // Retrieve argument count and required buffer size.
@@ -73,14 +74,14 @@ pub const WasiArgs = struct {
     /// Retrieve the process arguments and return an iterator over them. The
     /// returned iterator is an ArgvIterator, which is used on POSIX systems.
     /// Caller is responsible for calling `WasiArgs.deinit()` to free memory.
-    pub fn iterator(self: *WasiArgs, allocator: *Allocator) InitError!ArgvIterator {
+    pub fn iterator(self: *WasiArgs, allocator: Allocator) InitError!ArgvIterator {
         return ArgvIterator{
             .argv = try self.argv(allocator, false),
         };
     }
 
     /// Free the memory allocated by `argv()` or `iterator()`.
-    pub fn deinit(self: *WasiArgs, allocator: *Allocator) void {
+    pub fn deinit(self: *WasiArgs, allocator: Allocator) void {
         defer self.* = undefined;
         allocator.free(self.buf);
     }
@@ -91,7 +92,7 @@ pub const WasiArgs = struct {
     /// of implementing `WasiArgs.argv()` and `WasiArgs.iterator()`.
     pub fn allocBuf(
         self: *WasiArgs,
-        allocator: *Allocator,
+        allocator: Allocator,
         argc: usize,
         argv_size: usize,
         comptime span: bool,
@@ -132,7 +133,7 @@ pub const WindowsArgIterator = struct {
 
     /// Initialize the iterator using the kernel32 function GetCommandLineW.
     pub fn init() WindowsArgIterator {
-        if (std.builtin.os.tag != .windows)
+        if (builtin.os.tag != .windows)
             @compileError("Cannot initialize Windows argument iterator on non-Windows target.");
         return .{ .command_line = GetCommandLineW() };
     }
@@ -162,7 +163,7 @@ pub const WindowsArgIterator = struct {
     /// Windows argument decoding can be done with a fixed buffer; see `decodeNext`.
     pub fn decodeAlloc(
         self: *WindowsArgIterator,
-        allocator: *Allocator,
+        allocator: Allocator,
         comptime encoding: Encoding,
     ) error{OutOfMemory}!?encoding.v(null).Ret() {
         return self.parseAlloc(allocator, encoding, null);
@@ -184,7 +185,7 @@ pub const WindowsArgIterator = struct {
     /// Windows argument decoding can be done with a fixed buffer; see `decodeNextZ`.
     pub fn decodeAllocZ(
         self: *WindowsArgIterator,
-        allocator: *Allocator,
+        allocator: Allocator,
         comptime encoding: Encoding,
         comptime sentinel: encoding.Sentinel(),
     ) error{OutOfMemory}!?encoding.v(sentinel).Ret() {
@@ -234,7 +235,7 @@ pub const WindowsArgIterator = struct {
 
     fn parseAlloc(
         self: *WindowsArgIterator,
-        allocator: *Allocator,
+        allocator: Allocator,
         comptime encoding: Encoding,
         comptime sentinel: ?encoding.Sentinel(),
     ) !?encoding.v(sentinel).Ret() {
@@ -249,7 +250,7 @@ pub const WindowsArgIterator = struct {
                 }
                 return result;
             } else |_| {
-                try buf.ensureCapacity(allocator, buf.capacity + 1);
+                try buf.ensureTotalCapacity(allocator, buf.capacity + 1);
                 buf.items.len = buf.capacity;
             }
         }
@@ -573,10 +574,10 @@ test "zlaap.ArgvIterator" {
     const arg_3 = iterator.next() orelse return error.ExpectedArgument;
 
     // Validate the returned arguments and ensure no 4th argument is returned.
-    std.testing.expect(iterator.next() == null);
-    std.testing.expectEqualStrings(argv_str[0], arg_1);
-    std.testing.expectEqualStrings(argv_str[1], arg_2);
-    std.testing.expectEqualStrings(argv_str[2], arg_3);
+    try std.testing.expect(iterator.next() == null);
+    try std.testing.expectEqualStrings(argv_str[0], arg_1);
+    try std.testing.expectEqualStrings(argv_str[1], arg_2);
+    try std.testing.expectEqualStrings(argv_str[2], arg_3);
 }
 
 test "zlaap.WasiArgs" {
@@ -603,9 +604,9 @@ test "zlaap.WasiArgs" {
         // Ensure the allocation was performed correctly.
         const ArgvT = if (span) [:0]u8 else [*:0]u8;
         const ptr_size = comptime std.math.max(@sizeOf(ArgvT), @sizeOf([*:0]u8));
-        std.testing.expectEqual(test_buf.len, buf.buf.len);
-        std.testing.expectEqual(test_argv.len, buf.argv.len);
-        std.testing.expectEqual(test_buf.len + test_argv.len * ptr_size, wasi_args.buf.len);
+        try std.testing.expectEqual(test_buf.len, buf.buf.len);
+        try std.testing.expectEqual(test_argv.len, buf.argv.len);
+        try std.testing.expectEqual(test_buf.len + test_argv.len * ptr_size, wasi_args.buf.len);
         std.mem.copy(u8, buf.buf, test_buf);
         buf.argv[0] = @ptrCast([*:0]u8, buf.buf.ptr);
         buf.argv[1] = @ptrCast([*:0]u8, buf.buf.ptr) + 19;
@@ -613,16 +614,16 @@ test "zlaap.WasiArgs" {
         var argv: [3][:0]const u8 = undefined;
         if (span) {
             const argv_ = buf.span();
-            std.testing.expectEqual(test_argv.len, argv_.len);
+            try std.testing.expectEqual(test_argv.len, argv_.len);
             argv = argv_[0..test_argv.len].*;
         } else {
             var iterator = ArgvIterator{ .argv = buf.argv };
-            for (argv) |*arg, i|
+            for (argv) |*arg|
                 arg.* = iterator.next() orelse return error.ExpectedArgument;
-            std.testing.expect(iterator.next() == null);
+            try std.testing.expect(iterator.next() == null);
         }
         for (argv) |arg, i|
-            std.testing.expectEqualStrings(test_argv[i], arg);
+            try std.testing.expectEqualStrings(test_argv[i], arg);
     }
 }
 
@@ -676,15 +677,15 @@ const WindowsTest = struct {
             var iterator = iterator_init;
             for (self.argv_raw) |str| {
                 const result = iterator.next() orelse return error.ExpectedArgument;
-                std.testing.expectEqualSlices(u16, str, result);
+                try std.testing.expectEqualSlices(u16, str, result);
             }
 
             // Ensure that there is no fourth argument.
-            std.testing.expect(iterator.next() == null);
-            std.testing.expect((try iterator.decodeNext(.wtf8, &[_]u8{})) == null);
-            std.testing.expect((try iterator.decodeNext(.wtf16, &[_]u16{})) == null);
-            std.testing.expect((try iterator.decodeNextZ(.wtf8, &[_]u8{}, 0)) == null);
-            std.testing.expect((try iterator.decodeNextZ(.wtf16, &[_]u16{}, 0)) == null);
+            try std.testing.expect(iterator.next() == null);
+            try std.testing.expect((try iterator.decodeNext(.wtf8, &[_]u8{})) == null);
+            try std.testing.expect((try iterator.decodeNext(.wtf16, &[_]u16{})) == null);
+            try std.testing.expect((try iterator.decodeNextZ(.wtf8, &[_]u8{}, 0)) == null);
+            try std.testing.expect((try iterator.decodeNextZ(.wtf16, &[_]u16{}, 0)) == null);
         }
         const allocator = std.testing.allocator;
         inline for (.{ "wtf16", "wtf8" }) |encoding_| {
@@ -708,15 +709,15 @@ const WindowsTest = struct {
 
                 // Ensure that the returned argument matches what is expected.
                 inline for ([_]void{{}} ** results.len) |_, i|
-                    std.testing.expectEqualSlices(S, str, results[i]);
+                    try std.testing.expectEqualSlices(S, str, results[i]);
             }
             // Ensure that there is no fourth argument.
             for (iterators) |*iterator| {
-                std.testing.expect(iterator.next() == null);
-                std.testing.expect((try iterator.decodeNext(.wtf8, &[_]u8{})) == null);
-                std.testing.expect((try iterator.decodeNext(.wtf16, &[_]u16{})) == null);
-                std.testing.expect((try iterator.decodeNextZ(.wtf8, &[_]u8{}, 0)) == null);
-                std.testing.expect((try iterator.decodeNextZ(.wtf16, &[_]u16{}, 0)) == null);
+                try std.testing.expect(iterator.next() == null);
+                try std.testing.expect((try iterator.decodeNext(.wtf8, &[_]u8{})) == null);
+                try std.testing.expect((try iterator.decodeNext(.wtf16, &[_]u16{})) == null);
+                try std.testing.expect((try iterator.decodeNextZ(.wtf8, &[_]u8{}, 0)) == null);
+                try std.testing.expect((try iterator.decodeNextZ(.wtf16, &[_]u16{}, 0)) == null);
             }
         }
     }

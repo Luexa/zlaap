@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const CrossTarget = std.zig.CrossTarget;
 const ReleaseMode = std.builtin.Mode;
 const Builder = std.build.Builder;
@@ -28,10 +29,13 @@ pub fn build(b: *Builder) void {
     var cross_tests = b.option(bool, "cross-tests", "Execute tests through qemu, wasmtime, and wine") orelse test_everything;
     const wasi_tests = b.option(bool, "wasi-tests", "Execute tests through wasmtime") orelse cross_tests;
     const qemu_tests = (b.option(bool, "qemu-tests", "Execute tests through qemu") orelse cross_tests) and
-        std.builtin.os.tag != .windows;
+        builtin.os.tag != .windows;
     const wine_tests = (b.option(bool, "wine-tests", "Execute tests through wine") orelse cross_tests) and
-        std.builtin.os.tag != .windows and (std.builtin.cpu.arch == .x86_64 or std.builtin.cpu.arch == .i386);
+        builtin.os.tag != .windows and (builtin.cpu.arch == .x86_64 or builtin.cpu.arch == .i386);
     cross_tests = wasi_tests or qemu_tests or wine_tests;
+    b.enable_wasmtime = wasi_tests;
+    b.enable_qemu = qemu_tests;
+    b.enable_wine = wine_tests;
 
     var num_modes: usize = 0;
     var modes: [4]ReleaseMode = undefined;
@@ -63,14 +67,11 @@ pub fn build(b: *Builder) void {
         .step = test_step,
         .modes = modes[0..num_modes],
         .filter = test_filter,
-        .wasi_tests = wasi_tests,
-        .qemu_tests = qemu_tests,
-        .wine_tests = wine_tests,
     };
 
     if (cross_tests) {
         if (target) |t|
-            test_config.addTest(t, true);
+            test_config.addTest(t);
         for ([_]std.Target.Cpu.Arch{
             .x86_64,
             .i386,
@@ -78,22 +79,22 @@ pub fn build(b: *Builder) void {
             .arm,
             .riscv64,
         }) |arch| {
-            if (arch.ptrBitWidth() > std.builtin.cpu.arch.ptrBitWidth())
+            if (arch.ptrBitWidth() > builtin.cpu.arch.ptrBitWidth())
                 continue;
-            if (arch == .riscv64 and std.builtin.os.tag != .linux)
+            if (arch == .riscv64 and builtin.os.tag != .linux)
                 continue;
-            if (qemu_tests or arch == std.builtin.cpu.arch)
-                test_config.addTest(.{ .cpu_arch = arch, .os_tag = std.builtin.os.tag }, false);
+            if (qemu_tests or arch == builtin.cpu.arch)
+                test_config.addTest(.{ .cpu_arch = arch, .os_tag = builtin.os.tag });
         }
         if (wine_tests) {
-            const cpu_arch = std.builtin.cpu.arch;
+            const cpu_arch = builtin.cpu.arch;
             if (cpu_arch == .x86_64)
-                test_config.addTest(.{ .cpu_arch = .x86_64, .os_tag = .windows }, false);
-            test_config.addTest(.{ .cpu_arch = .i386, .os_tag = .windows }, false);
+                test_config.addTest(.{ .cpu_arch = .x86_64, .os_tag = .windows });
+            test_config.addTest(.{ .cpu_arch = .i386, .os_tag = .windows });
         }
         if (wasi_tests)
-            test_config.addTest(.{ .cpu_arch = .wasm32, .os_tag = .wasi }, false);
-    } else test_config.addTest(target orelse .{}, true);
+            test_config.addTest(.{ .cpu_arch = .wasm32, .os_tag = .wasi });
+    } else test_config.addTest(target orelse .{});
 
     b.default_step = test_step;
 }
@@ -104,18 +105,15 @@ const TestConfig = struct {
     num_tests: usize = 0,
     modes: []const ReleaseMode,
     filter: ?[]const u8,
-    wasi_tests: bool,
-    qemu_tests: bool,
-    wine_tests: bool,
 
-    fn addTest(self: *TestConfig, target: CrossTarget, default: bool) void {
+    fn addTest(self: *TestConfig, target: CrossTarget) void {
         const filter_arg = [_][]const u8{
             if (self.filter != null) "\n  filter: " else "",
             if (self.filter) |f| f else "",
         };
         const target_str = target.zigTriple(self.b.allocator) catch unreachable;
         for (self.modes) |mode| {
-            const log_step = self.b.addLog("unit tests\n  target: {}\n  mode: {}{}{}\n", .{
+            const log_step = self.b.addLog("unit tests\n  target: {s}\n  mode: {s}{s}{s}\n", .{
                 target_str,
                 @tagName(mode),
                 filter_arg[0],
@@ -126,9 +124,6 @@ const TestConfig = struct {
             test_step.setFilter(self.filter);
             test_step.setTarget(target);
             test_step.setBuildMode(mode);
-            test_step.enable_wasmtime = default or self.wasi_tests;
-            test_step.enable_qemu = default or self.qemu_tests;
-            test_step.enable_wine = default or self.wine_tests;
 
             if (self.newline()) |step|
                 self.step.dependOn(step);
