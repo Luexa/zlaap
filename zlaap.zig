@@ -55,7 +55,7 @@ pub const WasiArgs = struct {
         var argc: usize = undefined;
         var argv_size: usize = undefined;
         var err = wasi.args_sizes_get(&argc, &argv_size);
-        if (err != wasi.ESUCCESS)
+        if (err != wasi.errno_t.SUCCESS)
             return unexpectedErrno(err);
 
         // Allocate the buffer with enough space for argv slice and argument data.
@@ -64,7 +64,7 @@ pub const WasiArgs = struct {
 
         // Retrieve the argument data, storing it in the newly-allocated buffer.
         err = wasi.args_get(buf.argv.ptr, buf.buf.ptr);
-        if (err != wasi.ESUCCESS)
+        if (err != wasi.errno_t.SUCCESS)
             return unexpectedErrno(err);
 
         // Return the argv buffer, spanning it if requested.
